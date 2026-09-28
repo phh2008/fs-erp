@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>商品信息管理</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico?v=2">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { font: 14px/1.6 "Microsoft YaHei", "PingFang SC", sans-serif; background: #f0f2f5; color: #333; overflow: hidden; }
+  .container { width: 100%; height: 100vh; padding: 20px 32px; display: flex; flex-direction: column; }
+  .page-title { font-size: 20px; font-weight: 600; margin-bottom: 16px; color: #1f2d3d; flex-shrink: 0; }
+
+  .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+
+  /* 查询区 */
+  .filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; flex-shrink: 0; }
+  .filter-item { display: flex; align-items: center; gap: 6px; }
+  .filter-item label { color: #606266; white-space: nowrap; }
+  input[type=text], input[type=number], select {
+    height: 32px; padding: 0 10px; border: 1px solid #dcdfe6; border-radius: 4px; outline: none; background: #fff;
+  }
+  input:focus, select:focus { border-color: #409eff; }
+  .btn {
+    height: 32px; padding: 0 14px; border: 1px solid #dcdfe6; border-radius: 4px; background: #fff;
+    cursor: pointer; color: #606266; white-space: nowrap; font-size: 13px;
+  }
+  .btn:hover { border-color: #409eff; color: #409eff; }
+  .btn-primary { background: #409eff; border-color: #409eff; color: #fff; }
+  .btn-primary:hover { background: #66b1ff; color: #fff; }
+  .btn-success { background: #67c23a; border-color: #67c23a; color: #fff; }
+  .btn-success:hover { background: #85cf60; color: #fff; }
+  .btn-warning { background: #e6a23c; border-color: #e6a23c; color: #fff; }
+  .btn-warning:hover { background: #ebb563; color: #fff; }
+  .btn-text { border: none; background: none; color: #409eff; padding: 0 4px; height: auto; }
+  .btn-text.danger { color: #f56c6c; }
+  .btn-text:hover { text-decoration: underline; }
+
+  /* 表格卡片：占满剩余高度，内部滚动 */
+  .table-card { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+                position: relative; margin-bottom: 0; }
+
+  /* 工具栏 */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 12px; flex-shrink: 0; }
+
+  /* 表格：表头固定，仅表体区域滚动 */
+  .table-wrap { flex: 1; min-height: 160px; overflow: auto; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+  th, td { padding: 10px 8px; border-bottom: 1px solid #ebeef5; text-align: left; font-size: 13px;
+           overflow: hidden; }
+  th { background: #fafafa; color: #606266; font-weight: 600; white-space: nowrap; position: sticky;
+       top: 0; z-index: 2; }
+  .th-resizer { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; user-select: none; }
+  th:hover .th-resizer { border-right: 2px solid #409eff; }
+  tbody tr:hover { background: #f5f7fa; }
+  .stock-input { width: 80px; }
+  .stock-input:hover { border-color: #409eff; }
+  .url-cell { max-width: 100%; overflow: hidden; display: flex; align-items: center; gap: 4px; }
+  .ellipsis { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .name-cell { cursor: pointer; }
+  .name-cell:hover { color: #409eff; }
+  .cell-flex { display: flex; align-items: center; gap: 4px; }
+  .url-link { color: #409eff; text-decoration: none; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+  .url-link:hover { text-decoration: underline; }
+  .copy-btn { cursor: pointer; color: #909399; border: none; background: none; font-size: 13px; flex-shrink: 0; }
+  .copy-btn:hover { color: #409eff; }
+  .status-tag { display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 12px; }
+  .status-on { background: #f0f9eb; color: #67c23a; border: 1px solid #e1f3d8; }
+  .status-off { background: #fef0f0; color: #f56c6c; border: 1px solid #fde2e2; }
+  .empty-tip { text-align: center; color: #909399; padding: 40px 0 !important; }
+
+  /* 分页 */
+  .pager { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 14px; flex-shrink: 0; }
+  .pager .btn { min-width: 32px; padding: 0 10px; }
+  .pager .btn.active { background: #409eff; border-color: #409eff; color: #fff; }
+  .pager .btn:disabled { cursor: not-allowed; opacity: .5; }
+  .total-text { color: #606266; margin-right: auto; }
+
+  /* 弹窗 */
+  .mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 10;
+          align-items: center; justify-content: center; }
+  .mask.show { display: flex; }
+  .dialog { background: #fff; border-radius: 8px; width: 480px; max-height: 90vh; overflow: auto; padding: 20px; }
+  .dialog h3 { margin-bottom: 16px; font-size: 16px; }
+  .form-row { display: flex; align-items: center; margin-bottom: 14px; }
+  .form-row label { width: 80px; text-align: right; margin-right: 12px; color: #606266; flex-shrink: 0; }
+  .form-row input, .form-row select { flex: 1; }
+  .dialog-footer { text-align: right; margin-top: 8px; }
+  .dialog-footer .btn { margin-left: 10px; }
+  .required::before { content: "*"; color: #f56c6c; margin-right: 2px; }
+
+  .toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 20;
+    padding: 10px 20px; border-radius: 4px; color: #fff; display: none; font-size: 13px;
+  }
+  .toast.show { display: block; }
+  .toast.success { background: #67c23a; }
+  .toast.error { background: #f56c6c; }
+
+  /* 加载中遮罩 */
+  .loading-mask { display: none; position: absolute; inset: 0; background: rgba(255,255,255,.65);
+                  z-index: 5; align-items: center; justify-content: center; border-radius: 8px; }
+  .loading-mask.show { display: flex; }
+  .spinner { width: 26px; height: 26px; border: 3px solid #409eff; border-top-color: transparent;
+             border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn:disabled { cursor: not-allowed; opacity: .6; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="page-title">商品信息管理</div>
+
+  <!-- 查询条件 -->
+  <div class="card filter-bar">
+    <div class="filter-item">
+      <label>货号</label>
+      <input type="text" id="fGoodsNo" placeholder="请输入货号" style="width:150px">
+    </div>
+    <div class="filter-item">
+      <label>商品名称</label>
+      <input type="text" id="fName" placeholder="请输入名称" style="width:150px">
+    </div>
+    <div class="filter-item">
+      <label>品牌</label>
+      <select id="fBrand" style="width:140px" onchange="onBrandFilterChange(this)"><option value="">全部</option></select>
+    </div>
+    <button class="btn btn-primary" id="queryBtn" onclick="loadList(1)">查询</button>
+    <button class="btn" onclick="resetFilter()">重置</button>
+  </div>
+
+  <div class="card table-card">
+    <div class="loading-mask" id="loadingMask"><div class="spinner"></div><span style="margin-left:8px;color:#409eff">加载中…</span></div>
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="openAddDialog()">新增</button>
+      <button class="btn btn-warning" id="importBtn" onclick="document.getElementById('importFile').click()">导入</button>
+      <button class="btn btn-success" onclick="exportExcel()">导出</button>
+      <button class="btn" onclick="downloadTemplate()">下载导入模板</button>
+      <input type="file" id="importFile" accept=".xlsx,.xls" style="display:none" onchange="importExcel(this)">
+    </div>
+
+    <!-- 列表 -->
+    <div class="table-wrap">
+      <table id="goodsTable">
+      <colgroup>
+        <col><col><col><col><col><col><col><col><col><col><col style="width:110px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>名称</th><th>货号</th><th>库存</th><th>成本价</th><th>销售价</th>
+          <th>品牌</th><th>商品链接</th><th>状态</th><th>创建人</th><th>创建时间</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pager">
+      <span class="total-text" id="totalText"></span>
+      <span>每页</span>
+      <select id="pageSizeSel" onchange="changePageSize(this)">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="500">500</option>
+      </select>
+      <span>条</span>
+      <button class="btn" id="prevBtn" onclick="changePage(-1)">上一页</button>
+      <span id="pageNo"></span>
+      <button class="btn" id="nextBtn" onclick="changePage(1)">下一页</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新增/编辑弹窗 -->
+<div class="mask" id="dialogMask">
+  <div class="dialog">
+    <h3 id="dialogTitle">新增商品</h3>
+    <input type="hidden" id="dId">
+    <div class="form-row"><label class="required">名称</label><input type="text" id="dName"></div>
+    <div class="form-row"><label class="required">货号</label><input type="text" id="dGoodsNo"></div>
+    <div class="form-row">
+      <label class="required">品牌</label>
+      <input type="text" id="dBrand" list="brandList" placeholder="选择已有品牌或直接输入新品牌" autocomplete="off">
+      <datalist id="brandList"></datalist>
+    </div>
+    <div class="form-row"><label>成本价</label><input type="number" id="dCost" min="0" step="0.01" value="0"></div>
+    <div class="form-row"><label>销售价</label><input type="number" id="dSales" min="0" step="0.01" value="0"></div>
+    <div class="form-row"><label>库存</label><input type="number" id="dStock" min="0" step="1" value="0"></div>
+    <div class="form-row"><label>状态</label>
+      <select id="dStatus"><option value="0">已上架</option><option value="1">已下架</option></select>
+    </div>
+    <div class="form-row"><label>商品链接</label><input type="text" id="dUrl" placeholder="https://..."></div>
+    <div class="form-row"><label id="dPersonLabel">创建人</label><input type="text" id="dPerson"></div>
+    <div class="dialog-footer">
+      <button class="btn" onclick="closeDialog()">取消</button>
+      <button class="btn btn-primary" onclick="saveGoods()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let curPage = 1, total = 0, pageSize = 10, brandNames = [], loading = false;
+
+// ---------- 工具 ----------
+function toast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + type;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.className = 'toast', 2500);
+}
+async function api(url, options) {
+  const resp = await fetch(url, options);
+  const json = await resp.json();
+  if (json.code !== 0) throw new Error(json.msg || '请求失败');
+  return json.data;
+}
+function money(v) { return v == null ? '' : Number(v).toFixed(2); }
+// 补全商品链接协议，未带 http/https 时默认按 https 跳转
+function fullUrl(u) {
+  u = String(u || '').trim();
+  if (!u || /^https?:\/\//i.test(u)) return u;
+  return 'https://' + u;
+}
+
+// ---------- 品牌 ----------
+const BRAND_ADD_VALUE = '__add_brand__';
+async function loadBrands() {
+  const brands = await api('/api/brands');
+  brandNames = brands.map(b => b.name);
+  document.getElementById('fBrand').innerHTML = '<option value="">全部</option>' +
+    brands.map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('') +
+    `<option value="${BRAND_ADD_VALUE}">＋ 新增品牌…</option>`;
+  document.getElementById('brandList').innerHTML = brandNames.map(n => `<option value="${esc(n)}">`).join('');
+}
+// 查询条件品牌下拉：选中"新增品牌"选项时输入新品牌并入库
+async function onBrandFilterChange(sel) {
+  if (sel.value !== BRAND_ADD_VALUE) { loadList(1); return; }
+  const name = prompt('请输入新品牌名称');
+  sel.value = '';
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/brands', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() })
+    });
+    await loadBrands();
+    toast('品牌添加成功');
+  } catch (e) { toast(e.message, 'error'); }
+}
+// 若品牌不存在则创建并入库，返回最终品牌名。
+// 已存在（如导入时产生的品牌导致前端缓存过期）则直接继续保存
+async function ensureBrand(name) {
+  if (brandNames.includes(name)) return name;
+  try {
+    await api('/api/brands', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+  } catch (e) {
+    if (!/已存在/.test(e.message)) throw e;
+  }
+  await loadBrands();
+  return name;
+}
+
+// ---------- 列表 ----------
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function queryParams() {
+  const p = new URLSearchParams();
+  const goodsNo = document.getElementById('fGoodsNo').value.trim();
+  const name = document.getElementById('fName').value.trim();
+  const brand = document.getElementById('fBrand').value;
+  if (goodsNo) p.set('goodsNo', goodsNo);
+  if (name) p.set('name', name);
+  if (brand) p.set('brand', brand);
+  return p;
+}
+async function loadList(page) {
+  if (loading) return; // 防止重复请求
+  loading = true;
+  curPage = page || curPage;
+  document.getElementById('loadingMask').classList.add('show');
+  const queryBtn = document.getElementById('queryBtn');
+  queryBtn.disabled = true;
+  const p = queryParams();
+  p.set('page', curPage); p.set('size', pageSize);
+  try {
+    const data = await api('/api/goods?' + p.toString());
+    total = data.total;
+    renderTable(data.list);
+    renderPager();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    loading = false;
+    document.getElementById('loadingMask').classList.remove('show');
+    queryBtn.disabled = false;
+  }
+}
+function renderTable(list) {
+  const tbody = document.getElementById('tbody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td class="empty-tip" colspan="11">暂无数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(g => `
+    <tr>
+      <td><div class="ellipsis name-cell" title="点击复制：${esc(g.name)}"
+           onclick="copyText(this, '${esc(g.name).replace(/'/g, "\\'")}')">${esc(g.name)}</div></td>
+      <td><div class="cell-flex">
+        <span>${esc(g.goodsNo)}</span>
+        <button class="copy-btn" title="复制货号" onclick="copyText(this, '${esc(g.goodsNo).replace(/'/g, "\\'")}')">复制</button>
+      </div></td>
+      <td><input type="number" class="stock-input" min="0" step="1" value="${g.stock}"
+           onchange="updateStock(${g.id}, this)" onclick="event.stopPropagation()"></td>
+      <td>${money(g.costPrice)}</td>
+      <td>${money(g.salesPrice)}</td>
+      <td>${esc(g.brand)}</td>
+      <td><div class="url-cell">
+        ${g.url ? `<a class="url-link" href="${esc(fullUrl(g.url))}" target="_blank" rel="noopener" title="${esc(g.url)}">${esc(g.url)}</a>` : ''}
+        ${g.url ? `<button class="copy-btn" title="复制链接" onclick="copyText(this, '${esc(fullUrl(g.url)).replace(/'/g, "\\'")}')">复制</button>` : ''}
+      </div></td>
+      <td><span class="status-tag ${g.status === 0 ? 'status-on' : 'status-off'}">${g.status === 0 ? '已上架' : '已下架'}</span></td>
+      <td>${esc(g.createBy)}</td>
+      <td>${esc(g.createTime)}</td>
+      <td>
+        <button class="btn-text" onclick="openEditDialog(${g.id})">编辑</button>
+        <button class="btn-text danger" onclick="deleteGoods(${g.id})">删除</button>
+      </td>
+    </tr>`).join('');
+}
+function renderPager() {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  document.getElementById('totalText').textContent = `共 ${total} 条`;
+  document.getElementById('pageNo').textContent = `${curPage} / ${pages}`;
+  document.getElementById('prevBtn').disabled = curPage <= 1;
+  document.getElementById('nextBtn').disabled = curPage >= pages;
+}
+function changePage(delta) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const next = curPage + delta;
+  if (next < 1 || next > pages) return;
+  loadList(next);
+}
+function changePageSize(sel) {
+  pageSize = parseInt(sel.value, 10) || 10;
+  loadList(1);
+}
+function resetFilter() {
+  document.getElementById('fGoodsNo').value = '';
+  document.getElementById('fName').value = '';
+  document.getElementById('fBrand').value = '';
+  loadList(1);
+}
+
+// ---------- 库存行内编辑 ----------
+async function updateStock(id, input) {
+  const stock = parseInt(input.value, 10);
+  if (isNaN(stock) || stock < 0) { toast('库存必须为不小于0的整数', 'error'); return; }
+  try {
+    await api(`/api/goods/${id}/stock`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock })
+    });
+    toast('库存已更新');
+  } catch (e) { toast(e.message, 'error'); loadList(); }
+}
+
+// ---------- 复制到剪贴板 ----------
+async function copyText(btn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => btn.textContent = old, 1500);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    btn.textContent = '已复制';
+    setTimeout(() => btn.textContent = '复制', 1500);
+  }
+}
+
+// ---------- 新增/编辑 ----------
+function openAddDialog() {
+  document.getElementById('dialogTitle').textContent = '新增商品';
+  document.getElementById('dId').value = '';
+  document.getElementById('dName').value = '';
+  document.getElementById('dGoodsNo').value = '';
+  document.getElementById('dCost').value = '0';
+  document.getElementById('dSales').value = '0';
+  document.getElementById('dStock').value = '0';
+  document.getElementById('dStatus').value = '0';
+  document.getElementById('dUrl').value = '';
+  document.getElementById('dPersonLabel').textContent = '创建人';
+  document.getElementById('dPerson').value = '';
+  document.getElementById('dialogMask').classList.add('show');
+}
+async function openEditDialog(id) {
+  // 编辑弹窗需要按 id 定位商品，取整页数据量与200的较大值
+  const p = new URLSearchParams({ page: 1, size: Math.max(pageSize, 200) });
+  try {
+    const data = await api('/api/goods?' + p);
+    const g = data.list.find(x => x.id === id);
+    if (!g) { toast('未找到该商品', 'error'); return; }
+    document.getElementById('dialogTitle').textContent = '编辑商品';
+    document.getElementById('dId').value = g.id;
+    document.getElementById('dName').value = g.name;
+    document.getElementById('dGoodsNo').value = g.goodsNo;
+    document.getElementById('dBrand').value = g.brand;
+    document.getElementById('dCost').value = g.costPrice;
+    document.getElementById('dSales').value = g.salesPrice;
+    document.getElementById('dStock').value = g.stock;
+    document.getElementById('dStatus').value = g.status;
+    document.getElementById('dUrl').value = g.url || '';
+    document.getElementById('dPersonLabel').textContent = '更新人';
+    document.getElementById('dPerson').value = '';
+    document.getElementById('dialogMask').classList.add('show');
+  } catch (e) { toast(e.message, 'error'); }
+}
+function closeDialog() { document.getElementById('dialogMask').classList.remove('show'); }
+async function saveGoods() {
+  const id = document.getElementById('dId').value;
+  const body = {
+    name: document.getElementById('dName').value.trim(),
+    goodsNo: document.getElementById('dGoodsNo').value.trim(),
+    brand: document.getElementById('dBrand').value,
+    costPrice: parseFloat(document.getElementById('dCost').value) || 0,
+    salesPrice: parseFloat(document.getElementById('dSales').value) || 0,
+    stock: parseInt(document.getElementById('dStock').value, 10) || 0,
+    status: parseInt(document.getElementById('dStatus').value, 10),
+    url: document.getElementById('dUrl').value.trim(),
+    updateBy: document.getElementById('dPerson').value.trim()
+  };
+  if (id) {
+    body.updateBy = document.getElementById('dPerson').value.trim();
+  } else {
+    body.createBy = document.getElementById('dPerson').value.trim();
+  }
+  if (!body.name || !body.goodsNo || !body.brand) { toast('名称、货号、品牌不能为空', 'error'); return; }
+  try {
+    body.brand = await ensureBrand(body.brand); // 新品牌自动入库
+    await api(id ? `/api/goods/${id}` : '/api/goods', {
+      method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    closeDialog(); toast('保存成功'); loadList(1);
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function deleteGoods(id) {
+  if (!confirm('确定删除该商品吗？')) return;
+  try {
+    await api(`/api/goods/${id}`, { method: 'DELETE' });
+    toast('删除成功'); loadList();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ---------- 导入/导出 ----------
+async function importExcel(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const btn = document.getElementById('importBtn');
+  const oldText = btn.textContent;
+  btn.disabled = true; btn.textContent = '导入中…';
+  document.getElementById('loadingMask').classList.add('show');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/api/goods/import', { method: 'POST', body: fd });
+    const json = await resp.json();
+    if (json.code !== 0) throw new Error(json.msg || '导入失败');
+    const d = json.data;
+    let msg = `导入完成：共 ${d.totalRows} 行，新增 ${d.added} 条，覆盖更新 ${d.updated} 条` +
+      `,文件内重复合并 ${d.duplicates} 行，空行忽略 ${d.blankRows} 行`;
+    if (d.errors && d.errors.length) {
+      msg += `，失败 ${d.errors.length} 行\n` + d.errors.join('\n');
+      alert(msg);
+    } else {
+      toast(msg);
+    }
+    loadBrands(); // 导入可能产生新品牌，刷新品牌缓存
+    loadList(1);
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = oldText;
+    document.getElementById('loadingMask').classList.remove('show');
+  }
+}
+function exportExcel() {
+  const p = queryParams();
+  window.open('/api/goods/export?' + p.toString());
+}
+function downloadTemplate() {
+  window.open('/api/goods/template');
+}
+
+// ---------- 表头列宽拖拽 ----------
+function initColResize() {
+  const ths = document.querySelectorAll('#goodsTable thead th');
+  const cols = document.querySelectorAll('#goodsTable colgroup col');
+  ths.forEach((th, i) => {
+    const col = cols[i];
+    if (!col) return;
+    const key = 'fs-erp-colw-' + i;
+    const saved = localStorage.getItem(key);
+    if (saved) col.style.width = saved + 'px';
+    const rz = document.createElement('div');
+    rz.className = 'th-resizer';
+    th.appendChild(rz);
+    rz.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = col.offsetWidth || th.offsetWidth;
+      const move = (ev) => {
+        col.style.width = Math.max(60, startW + ev.clientX - startX) + 'px';
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        localStorage.setItem(key, parseInt(col.style.width, 10) || col.offsetWidth);
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  });
+}
+
+// 初始化
+initColResize();
+loadBrands();
+loadList(1);
+</script>
+</body>
+</html>
