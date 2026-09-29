@@ -215,8 +215,8 @@ var importRequiredColumns = []string{"货号", "商品链接"}
 // defaultImportStock 导入时库存缺省值
 const defaultImportStock = 100
 
-// ImportGoods Excel 导入：货号+商品链接不为空即导入；以 货号+名称+品牌 组合唯一，
-// 名称/品牌为空时按货号通配匹配，存在则覆盖，否则新增
+// ImportGoods Excel 导入：货号+商品链接不为空即导入；以 货号+名称+品牌+链接
+// （名称/品牌为空按空串参与匹配）为唯一键，存在则覆盖，否则新增
 func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
@@ -262,26 +262,23 @@ func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 
 	now := model.LocalTime(time.Now())
 
-	// 一次性预加载现有商品的货号索引，避免逐行 SELECT（性能优化）
-	// 行内名称/品牌为空时按货号通配匹配，故按货号分组
-	existing := make(map[string][]model.Goods)
+	// 一次性预加载现有商品的唯一键索引，避免逐行 SELECT（性能优化）
+	// 唯一键：货号+名称+品牌+链接（名称/品牌为空按空串参与匹配）
+	type existKey struct{ goodsNo, name, brand, url string }
+	existing := make(map[existKey]model.Goods)
 	var allGoods []model.Goods
-	if err := h.db.Select("id", "goods_no", "name", "brand").
+	if err := h.db.Select("id", "goods_no", "name", "brand", "url").
 		Where("deleted = 0").Find(&allGoods).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "msg": "读取现有商品失败: " + err.Error()})
 		return
 	}
 	for _, g := range allGoods {
-		existing[g.GoodsNo] = append(existing[g.GoodsNo], model.Goods{ID: g.ID, GoodsNo: g.GoodsNo, Name: g.Name, Brand: g.Brand})
+		existing[existKey{g.GoodsNo, g.Name, g.Brand, g.URL}] = model.Goods{ID: g.ID, GoodsNo: g.GoodsNo}
 	}
 
 	toInsert := make([]model.Goods, 0, len(rows))
 	toUpdate := make([]model.Goods, 0, len(rows))
-	pendingIdx := make(map[string][]int) // 同一文件内重复行：按货号分组定位到待插入记录
-	// match 通配匹配：行的名称/品牌为空时不参与比对
-	match := func(g model.Goods, name, brand string) bool {
-		return (name == "" || g.Name == name) && (brand == "" || g.Brand == brand)
-	}
+	pendingIdx := make(map[existKey]int) // 同一文件内重复行定位到待插入记录
 	newBrands := map[string]struct{}{}
 	var errs []string
 	var duplicates, blankRows int
@@ -317,35 +314,22 @@ func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 			newBrands[brand] = struct{}{}
 		}
 
-		matched := -1
-		for _, idx := range pendingIdx[goodsNo] { // 同文件内重复行：后一行覆盖前一行
-			if match(toInsert[idx], name, brand) {
-				matched = idx
-				break
-			}
-		}
-		if matched >= 0 {
+		k := existKey{goodsNo, name, brand, url}
+		if idx, ok := pendingIdx[k]; ok {
+			// 同文件内重复行：后一行覆盖前一行
 			duplicates++
-			toInsert[matched].CostPrice, toInsert[matched].SalesPrice = cost, sales
-			toInsert[matched].Stock, toInsert[matched].URL = stock, url
+			toInsert[idx].CostPrice, toInsert[idx].SalesPrice = cost, sales
+			toInsert[idx].Stock = stock
 			continue
 		}
-		var exist *model.Goods
-		for j := range existing[goodsNo] {
-			if match(existing[goodsNo][j], name, brand) {
-				exist = &existing[goodsNo][j]
-				break
-			}
-		}
-		if exist != nil {
+		if exist, ok := existing[k]; ok {
 			// 已存在则覆盖
-			g := *exist
-			g.CostPrice, g.SalesPrice, g.Stock, g.URL = cost, sales, stock, url
-			g.UpdateBy, g.UpdateTime = "导入", now
-			toUpdate = append(toUpdate, g)
+			exist.CostPrice, exist.SalesPrice, exist.Stock = cost, sales, stock
+			exist.UpdateBy, exist.UpdateTime = "导入", now
+			toUpdate = append(toUpdate, exist)
 		} else {
 			// 不存在则新增
-			pendingIdx[goodsNo] = append(pendingIdx[goodsNo], len(toInsert))
+			pendingIdx[k] = len(toInsert)
 			toInsert = append(toInsert, model.Goods{
 				Name: name, GoodsNo: goodsNo, Brand: brand,
 				CostPrice: cost, SalesPrice: sales, Stock: stock, URL: url,
