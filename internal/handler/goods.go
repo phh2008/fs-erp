@@ -210,12 +210,13 @@ func (h *GoodsHandler) existsGoods(goodsNo, name, brand string, excludeID int64)
 var templateColumns = []string{"商品链接", "货号", "成本价", "销售价", "名称", "品牌", "库存"}
 
 // importRequiredColumns 导入必填列
-var importRequiredColumns = []string{"货号", "名称", "品牌"}
+var importRequiredColumns = []string{"货号", "商品链接"}
 
 // defaultImportStock 导入时库存缺省值
 const defaultImportStock = 100
 
-// ImportGoods Excel 导入：以 货号+名称+品牌 组合唯一，存在则覆盖，否则新增
+// ImportGoods Excel 导入：货号+商品链接不为空即导入；以 货号+名称+品牌 组合唯一，
+// 名称/品牌为空时按货号通配匹配，存在则覆盖，否则新增
 func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
@@ -261,9 +262,9 @@ func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 
 	now := model.LocalTime(time.Now())
 
-	// 一次性预加载现有商品的唯一键索引，避免逐行 SELECT（性能优化）
-	type existKey struct{ goodsNo, name, brand string }
-	existing := make(map[existKey]model.Goods)
+	// 一次性预加载现有商品的货号索引，避免逐行 SELECT（性能优化）
+	// 行内名称/品牌为空时按货号通配匹配，故按货号分组
+	existing := make(map[string][]model.Goods)
 	var allGoods []model.Goods
 	if err := h.db.Select("id", "goods_no", "name", "brand").
 		Where("deleted = 0").Find(&allGoods).Error; err != nil {
@@ -271,12 +272,16 @@ func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 		return
 	}
 	for _, g := range allGoods {
-		existing[existKey{g.GoodsNo, g.Name, g.Brand}] = model.Goods{ID: g.ID, GoodsNo: g.GoodsNo}
+		existing[g.GoodsNo] = append(existing[g.GoodsNo], model.Goods{ID: g.ID, GoodsNo: g.GoodsNo, Name: g.Name, Brand: g.Brand})
 	}
 
 	toInsert := make([]model.Goods, 0, len(rows))
 	toUpdate := make([]model.Goods, 0, len(rows))
-	pendingIdx := make(map[existKey]int) // 同一文件内重复行定位到待插入记录
+	pendingIdx := make(map[string][]int) // 同一文件内重复行：按货号分组定位到待插入记录
+	// match 通配匹配：行的名称/品牌为空时不参与比对
+	match := func(g model.Goods, name, brand string) bool {
+		return (name == "" || g.Name == name) && (brand == "" || g.Brand == brand)
+	}
 	newBrands := map[string]struct{}{}
 	var errs []string
 	var duplicates, blankRows int
@@ -294,11 +299,12 @@ func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 			blankRows++
 			continue
 		}
-		goodsNo, name, brand := get("货号"), get("名称"), get("品牌")
-		if goodsNo == "" || name == "" || brand == "" {
-			errs = append(errs, fmt.Sprintf("第%d行：货号/名称/品牌不能为空", lineNo))
+		goodsNo, url := get("货号"), get("商品链接")
+		if goodsNo == "" || url == "" {
+			errs = append(errs, fmt.Sprintf("第%d行：货号和商品链接不能为空", lineNo))
 			continue
 		}
+		name, brand := get("名称"), get("品牌")
 		cost, _ := strconv.ParseFloat(get("成本价"), 64)
 		sales, _ := strconv.ParseFloat(get("销售价"), 64)
 		stock := defaultImportStock // 库存可为空，默认100
@@ -307,25 +313,39 @@ func (h *GoodsHandler) ImportGoods(c *gin.Context) {
 				stock = n
 			}
 		}
-		url := get("商品链接")
-		newBrands[brand] = struct{}{}
+		if brand != "" {
+			newBrands[brand] = struct{}{}
+		}
 
-		k := existKey{goodsNo, name, brand}
-		if idx, ok := pendingIdx[k]; ok {
-			// 同文件内重复行：后一行覆盖前一行
+		matched := -1
+		for _, idx := range pendingIdx[goodsNo] { // 同文件内重复行：后一行覆盖前一行
+			if match(toInsert[idx], name, brand) {
+				matched = idx
+				break
+			}
+		}
+		if matched >= 0 {
 			duplicates++
-			toInsert[idx].CostPrice, toInsert[idx].SalesPrice = cost, sales
-			toInsert[idx].Stock, toInsert[idx].URL = stock, url
+			toInsert[matched].CostPrice, toInsert[matched].SalesPrice = cost, sales
+			toInsert[matched].Stock, toInsert[matched].URL = stock, url
 			continue
 		}
-		if exist, ok := existing[k]; ok {
+		var exist *model.Goods
+		for j := range existing[goodsNo] {
+			if match(existing[goodsNo][j], name, brand) {
+				exist = &existing[goodsNo][j]
+				break
+			}
+		}
+		if exist != nil {
 			// 已存在则覆盖
-			exist.CostPrice, exist.SalesPrice, exist.Stock, exist.URL = cost, sales, stock, url
-			exist.UpdateBy, exist.UpdateTime = "导入", now
-			toUpdate = append(toUpdate, exist)
+			g := *exist
+			g.CostPrice, g.SalesPrice, g.Stock, g.URL = cost, sales, stock, url
+			g.UpdateBy, g.UpdateTime = "导入", now
+			toUpdate = append(toUpdate, g)
 		} else {
 			// 不存在则新增
-			pendingIdx[k] = len(toInsert)
+			pendingIdx[goodsNo] = append(pendingIdx[goodsNo], len(toInsert))
 			toInsert = append(toInsert, model.Goods{
 				Name: name, GoodsNo: goodsNo, Brand: brand,
 				CostPrice: cost, SalesPrice: sales, Stock: stock, URL: url,
@@ -389,7 +409,8 @@ func (h *GoodsHandler) ExportGoods(c *gin.Context) {
 	excel := excelize.NewFile()
 	defer excel.Close()
 	sheet := excel.GetSheetList()[0]
-	headers := []string{"名称", "货号", "库存", "成本价", "销售价", "品牌", "商品链接", "创建人", "创建时间"}
+	// 列顺序与导入模板一致，导出文件可直接再导入
+	headers := templateColumns
 	for i, title := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		excel.SetCellValue(sheet, cell, title)
@@ -400,15 +421,13 @@ func (h *GoodsHandler) ExportGoods(c *gin.Context) {
 			cell, _ := excelize.CoordinatesToCellName(col, row)
 			excel.SetCellValue(sheet, cell, val)
 		}
-		set(1, g.Name)
+		set(1, g.URL)
 		set(2, g.GoodsNo)
-		set(3, g.Stock)
-		set(4, g.CostPrice)
-		set(5, g.SalesPrice)
+		set(3, g.CostPrice)
+		set(4, g.SalesPrice)
+		set(5, g.Name)
 		set(6, g.Brand)
-		set(7, g.URL)
-		set(8, g.CreateBy)
-		set(9, time.Time(g.CreateTime).Format("2006-01-02 15:04:05"))
+		set(7, g.Stock)
 	}
 
 	c.Header("Content-Disposition", `attachment; filename="goods_`+time.Now().Format("20060102150405")+`.xlsx"`)
