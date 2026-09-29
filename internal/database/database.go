@@ -102,10 +102,6 @@ func seed(db *gorm.DB) {
 	}
 	now := model.LocalTime(time.Now())
 	brands := []model.Brand{
-		{Name: "Apple", CreateTime: now},
-		{Name: "华为", CreateTime: now},
-		{Name: "小米", CreateTime: now},
-		{Name: "三星", CreateTime: now},
 		{Name: "其他", CreateTime: now},
 	}
 	if err := db.Create(&brands).Error; err != nil {
